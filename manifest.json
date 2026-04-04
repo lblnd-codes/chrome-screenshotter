@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Page Screenshot",
+  "version": "1.0",
+  "description": "Take screenshots with smart filenames for social media posts",
+  "permissions": ["activeTab", "downloads", "scripting"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Take Screenshot"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}

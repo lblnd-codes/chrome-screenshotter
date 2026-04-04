@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 16px;
+      width: 220px;
+      background: #1a1a1a;
+      color: #f0f0f0;
+    }
+    h3 {
+      margin: 0 0 12px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #fff;
+    }
+    button {
+      width: 100%;
+      padding: 10px;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button:hover { background: #1d4ed8; }
+    button:active { background: #1e40af; }
+    button:disabled { background: #374151; color: #6b7280; cursor: default; }
+    #status {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #9ca3af;
+      min-height: 16px;
+      word-break: break-all;
+    }
+    #status.success { color: #34d399; }
+    #status.error { color: #f87171; }
+  </style>
+</head>
+<body>
+  <h3>Page Screenshot</h3>
+  <button id="btn">Take Screenshot</button>
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
