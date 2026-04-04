@@ -18,8 +18,16 @@ function extractPageInfo() {
   if (hostname === 'instagram.com') {
     const m = path.match(/^\/(?:p|reel)\/([^/]+)/);
     if (m) {
-      const el = document.querySelector('header a[role="link"], article header a, h2 a');
-      const username = el ? sanitize(el.textContent.trim()) : 'unknown';
+      // Extract username from the profile link's href (works in both modal and direct views)
+      const profileLink =
+        document.querySelector('div[role="dialog"] header a[href^="/"]') ||
+        document.querySelector('article header a[href^="/"]') ||
+        document.querySelector('header a[href^="/"][role="link"]');
+      let username = 'unknown';
+      if (profileLink) {
+        const hrefMatch = profileLink.getAttribute('href').match(/^\/([^/?]+)/);
+        if (hrefMatch) username = sanitize(hrefMatch[1]) || 'unknown';
+      }
       return { username, postId: sanitize(m[1]) };
     }
   }
