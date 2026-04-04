@@ -28,7 +28,32 @@ function extractPageInfo() {
         const hrefMatch = profileLink.getAttribute('href').match(/^\/([^/?]+)/);
         if (hrefMatch) username = sanitize(hrefMatch[1]) || 'unknown';
       }
-      return { username, postId: sanitize(m[1]) };
+
+      // Detect carousel and current slide number
+      let slide = null;
+
+      // Strategy 1: aria-label containing "X of Y" (e.g. "Photo 2 of 5")
+      const ariaEl = document.querySelector('[aria-label*=" of "]');
+      if (ariaEl) {
+        const am = ariaEl.getAttribute('aria-label').match(/(\d+)\s+of\s+\d+/i);
+        if (am) slide = parseInt(am[1]);
+      }
+
+      // Strategy 2: parse translateX of the carousel <ul> to infer position
+      if (slide === null) {
+        for (const ul of document.querySelectorAll('div[role="dialog"] ul, article ul')) {
+          const items = [...ul.querySelectorAll(':scope > li')];
+          if (items.length < 2) continue;
+          const tm = (ul.style.transform || '').match(/translateX\((-?[\d.]+)px\)/);
+          if (!tm) continue;
+          const slideWidth = ul.offsetWidth;
+          if (!slideWidth) continue;
+          const idx = Math.round(Math.abs(parseFloat(tm[1])) / slideWidth);
+          if (idx >= 0 && idx < items.length) { slide = idx + 1; break; }
+        }
+      }
+
+      return { username, postId: sanitize(m[1]), slide };
     }
   }
 
@@ -99,7 +124,8 @@ function buildFilename(tab, socialInfo, ext = 'png') {
   function pad(n) { return String(n).padStart(2, '0'); }
 
   if (socialInfo) {
-    return `${socialInfo.username} - ${socialInfo.postId}.${ext}`;
+    const slideStr = socialInfo.slide != null ? ` - ${socialInfo.slide}` : '';
+    return `${socialInfo.username} - ${socialInfo.postId}${slideStr}.${ext}`;
   }
 
   const url = new URL(tab.url);
