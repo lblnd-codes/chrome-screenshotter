@@ -39,17 +39,67 @@ function extractPageInfo() {
         if (am) slide = parseInt(am[1]);
       }
 
-      // Strategy 2: parse translateX of the carousel <ul> to infer position
+      // Strategy 2: ARIA tab pattern used for dot indicators
+      // e.g. <div role="tablist"><button role="tab" aria-selected="true">
+      if (slide === null) {
+        const tablist = document.querySelector('[role="tablist"]');
+        if (tablist) {
+          const tabs = [...tablist.querySelectorAll('[role="tab"]')];
+          const idx = tabs.findIndex(t => t.getAttribute('aria-selected') === 'true');
+          if (idx >= 0) slide = idx + 1;
+        }
+      }
+
+      // Strategy 3: parse translateX of the carousel <ul>/<div> to infer position
+      if (slide === null) {
+        for (const el of document.querySelectorAll('div[role="dialog"] ul, article ul, div[role="dialog"] > div > div, article > div > div')) {
+          const items = [...el.querySelectorAll(':scope > li, :scope > div')].filter(c => c.offsetWidth > 50);
+          if (items.length < 2) continue;
+          const tm = (el.style.transform || '').match(/translateX\((-?[\d.]+)px\)/);
+          if (!tm) continue;
+          const slideWidth = el.offsetWidth || items[0].offsetWidth;
+          if (!slideWidth) continue;
+          const idx = Math.round(Math.abs(parseFloat(tm[1])) / slideWidth);
+          if (idx >= 0 && idx < items.length) { slide = idx + 1; break; }
+        }
+      }
+
+      // Strategy 4: scrollLeft on the carousel container
+      if (slide === null) {
+        for (const el of document.querySelectorAll('div[role="dialog"] ul, article ul, div[role="dialog"] > div > div, article > div > div')) {
+          const items = [...el.querySelectorAll(':scope > li, :scope > div')].filter(c => c.offsetWidth > 50);
+          if (items.length < 2) continue;
+          if (el.scrollLeft === 0 && el.scrollWidth <= el.offsetWidth) continue;
+          const slideWidth = items[0].offsetWidth;
+          if (!slideWidth) continue;
+          const idx = Math.round(el.scrollLeft / slideWidth);
+          if (idx >= 0 && idx < items.length) { slide = idx + 1; break; }
+        }
+      }
+
+      // Strategy 5: which <li>/<div> child is centered in the carousel viewport
+      // Works regardless of scroll/transform implementation
+      if (slide === null) {
+        for (const el of document.querySelectorAll('div[role="dialog"] ul, article ul')) {
+          const items = [...el.querySelectorAll(':scope > li')];
+          if (items.length < 2) continue;
+          const containerRect = el.getBoundingClientRect();
+          const centerX = containerRect.left + containerRect.width / 2;
+          for (let i = 0; i < items.length; i++) {
+            const r = items[i].getBoundingClientRect();
+            if (r.left <= centerX && r.right > centerX) { slide = i + 1; break; }
+          }
+          if (slide !== null) break;
+        }
+      }
+
+      // Strategy 6: aria-hidden on list items — visible item is not aria-hidden
       if (slide === null) {
         for (const ul of document.querySelectorAll('div[role="dialog"] ul, article ul')) {
           const items = [...ul.querySelectorAll(':scope > li')];
           if (items.length < 2) continue;
-          const tm = (ul.style.transform || '').match(/translateX\((-?[\d.]+)px\)/);
-          if (!tm) continue;
-          const slideWidth = ul.offsetWidth;
-          if (!slideWidth) continue;
-          const idx = Math.round(Math.abs(parseFloat(tm[1])) / slideWidth);
-          if (idx >= 0 && idx < items.length) { slide = idx + 1; break; }
+          const idx = items.findIndex(li => li.getAttribute('aria-hidden') !== 'true');
+          if (idx >= 0) { slide = idx + 1; break; }
         }
       }
 
