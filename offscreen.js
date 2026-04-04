@@ -39,9 +39,19 @@ async function startRecording(streamId, filename) {
   pendingFilename = filename;
   chunks = [];
 
-  const mimeType = MediaRecorder.isTypeSupported('video/webm; codecs=vp9,opus')
-    ? 'video/webm; codecs=vp9,opus'
-    : 'video/webm';
+  const mp4Type = ['video/mp4; codecs=avc1.42E01E,mp4a.40.2', 'video/mp4'].find(
+    t => MediaRecorder.isTypeSupported(t)
+  );
+  const mimeType = mp4Type ?? (
+    MediaRecorder.isTypeSupported('video/webm; codecs=vp9,opus')
+      ? 'video/webm; codecs=vp9,opus'
+      : 'video/webm'
+  );
+
+  // If MP4 isn't supported, fix the filename extension to .webm
+  if (!mp4Type) {
+    pendingFilename = pendingFilename.replace(/\.mp4$/, '.webm');
+  }
 
   mediaRecorder = new MediaRecorder(stream, { mimeType });
   mediaRecorder.ondataavailable = e => {
@@ -59,7 +69,8 @@ function stopRecording() {
 
     mediaRecorder.onstop = async () => {
       try {
-        const blob = new Blob(chunks, { type: 'video/webm' });
+        const blobType = pendingFilename.endsWith('.mp4') ? 'video/mp4' : 'video/webm';
+        const blob = new Blob(chunks, { type: blobType });
         const url = URL.createObjectURL(blob);
 
         await chrome.downloads.download({

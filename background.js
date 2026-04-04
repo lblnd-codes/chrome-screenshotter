@@ -99,7 +99,7 @@ function buildFilename(tab, socialInfo, ext = 'png') {
   const now = new Date();
   const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
              `_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-  const prefix = ext === 'webm' ? 'recording' : 'screenshot';
+  const prefix = ext === 'mp4' ? 'recording' : 'screenshot';
   return `${prefix} - ${domain} - ${ts}.${ext}`;
 }
 
@@ -201,7 +201,7 @@ async function handleStartRecording(sendResponse) {
     if (!tab) throw new Error('No active tab found');
 
     const socialInfo = await getPageSocialInfo(tab.id);
-    const filename = buildFilename(tab, socialInfo, 'webm');
+    const filename = buildFilename(tab, socialInfo, 'mp4');
     const streamId = await getStreamId(tab.id);
 
     await ensureOffscreenDocument();
