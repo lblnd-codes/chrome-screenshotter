@@ -20,7 +20,6 @@
     button {
       width: 100%;
       padding: 10px;
-      background: #2563eb;
       color: #fff;
       border: none;
       border-radius: 6px;
@@ -29,9 +28,42 @@
       cursor: pointer;
       transition: background 0.15s;
     }
-    button:hover { background: #1d4ed8; }
-    button:active { background: #1e40af; }
-    button:disabled { background: #374151; color: #6b7280; cursor: default; }
+    #btn-screenshot { background: #2563eb; margin-bottom: 8px; }
+    #btn-screenshot:hover { background: #1d4ed8; }
+    #btn-screenshot:active { background: #1e40af; }
+
+    #btn-record { background: #16a34a; }
+    #btn-record:hover { background: #15803d; }
+    #btn-record:active { background: #166534; }
+    #btn-record.recording { background: #dc2626; }
+    #btn-record.recording:hover { background: #b91c1c; }
+
+    button:disabled { background: #374151 !important; color: #6b7280; cursor: default; }
+
+    .record-label {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #fff;
+      flex-shrink: 0;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    hr {
+      border: none;
+      border-top: 1px solid #2d2d2d;
+      margin: 10px 0;
+    }
     #status {
       margin-top: 10px;
       font-size: 12px;
@@ -40,12 +72,16 @@
       word-break: break-all;
     }
     #status.success { color: #34d399; }
-    #status.error { color: #f87171; }
+    #status.error   { color: #f87171; }
   </style>
 </head>
 <body>
-  <h3>Page Screenshot</h3>
-  <button id="btn">Take Screenshot</button>
+  <h3>Screenshot & Recorder</h3>
+  <button id="btn-screenshot">Take Screenshot</button>
+  <hr>
+  <button id="btn-record">
+    <span class="record-label"><span id="record-text">Start Recording</span></span>
+  </button>
   <div id="status"></div>
   <script src="popup.js"></script>
 </body>

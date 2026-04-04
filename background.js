@@ -52,10 +52,8 @@ function extractPageInfo() {
 
   // LinkedIn
   if (hostname === 'linkedin.com') {
-    // /posts/username_activityId-postId-type/
     const m = path.match(/\/posts\/([^/_]+)[_-]([a-zA-Z0-9]+)/);
     if (m) return { username: sanitize(m[1]), postId: sanitize(m[2]) };
-    // /feed/update/urn:li:activity:id
     const a = path.match(/\/feed\/update\/urn:li:activity:(\d+)/);
     if (a) {
       const el = document.querySelector(
@@ -89,59 +87,158 @@ function extractPageInfo() {
   return null;
 }
 
-function buildFilename(tab, socialInfo) {
+function buildFilename(tab, socialInfo, ext = 'png') {
   function pad(n) { return String(n).padStart(2, '0'); }
 
   if (socialInfo) {
-    return `${socialInfo.username} - ${socialInfo.postId}.png`;
+    return `${socialInfo.username} - ${socialInfo.postId}.${ext}`;
   }
 
-  // Fallback: domain + timestamp
   const url = new URL(tab.url);
   const domain = url.hostname.replace(/^www\./, '');
   const now = new Date();
   const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
              `_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-  return `screenshot - ${domain} - ${ts}.png`;
+  const prefix = ext === 'webm' ? 'recording' : 'screenshot';
+  return `${prefix} - ${domain} - ${ts}.${ext}`;
 }
 
+async function getPageSocialInfo(tabId) {
+  try {
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: extractPageInfo,
+    });
+    return result?.result ?? null;
+  } catch {
+    return null; // chrome:// or other restricted pages
+  }
+}
+
+// ─── Recording state ───────────────────────────────────────────────────────────
+
+let recording = { active: false, filename: null };
+
+function getStreamId(tabId) {
+  return new Promise((resolve, reject) => {
+    chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }, streamId => {
+      chrome.runtime.lastError
+        ? reject(new Error(chrome.runtime.lastError.message))
+        : resolve(streamId);
+    });
+  });
+}
+
+async function ensureOffscreenDocument() {
+  const contexts = await chrome.runtime.getContexts({
+    contextTypes: ['OFFSCREEN_DOCUMENT'],
+  });
+  if (contexts.length === 0) {
+    await chrome.offscreen.createDocument({
+      url: 'offscreen.html',
+      reasons: ['USER_MEDIA'],
+      justification: 'Record tab video and audio via tabCapture stream',
+    });
+  }
+}
+
+// ─── Message handler ───────────────────────────────────────────────────────────
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message.action !== 'screenshot') return;
+  // Ignore messages routed to the offscreen document
+  if (message.target === 'offscreen') return;
 
-  (async () => {
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab) throw new Error('No active tab found');
+  switch (message.action) {
+    case 'getState':
+      sendResponse({ recording: recording.active, filename: recording.filename });
+      break;
 
-      // Try to extract social media info from the page
-      let socialInfo = null;
-      try {
-        const [result] = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: extractPageInfo,
-        });
-        socialInfo = result?.result ?? null;
-      } catch {
-        // Page may not allow scripting (e.g. chrome:// URLs) – that's fine
-      }
+    case 'screenshot':
+      handleScreenshot(sendResponse);
+      return true;
 
-      const filename = buildFilename(tab, socialInfo);
+    case 'startRecording':
+      handleStartRecording(sendResponse);
+      return true;
 
-      // Capture visible area
-      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
-
-      await chrome.downloads.download({
-        url: dataUrl,
-        filename,
-        saveAs: false,
-        conflictAction: 'uniquify',
-      });
-
-      sendResponse({ filename });
-    } catch (err) {
-      sendResponse({ error: err.message });
-    }
-  })();
-
-  return true; // keep message channel open for async response
+    case 'stopRecording':
+      handleStopRecording(sendResponse);
+      return true;
+  }
 });
+
+// ─── Handlers ─────────────────────────────────────────────────────────────────
+
+async function handleScreenshot(sendResponse) {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab) throw new Error('No active tab found');
+
+    const socialInfo = await getPageSocialInfo(tab.id);
+    const filename = buildFilename(tab, socialInfo, 'png');
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+
+    await chrome.downloads.download({
+      url: dataUrl,
+      filename,
+      saveAs: false,
+      conflictAction: 'uniquify',
+    });
+
+    sendResponse({ filename });
+  } catch (err) {
+    sendResponse({ error: err.message });
+  }
+}
+
+async function handleStartRecording(sendResponse) {
+  if (recording.active) {
+    sendResponse({ error: 'Already recording' });
+    return;
+  }
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab) throw new Error('No active tab found');
+
+    const socialInfo = await getPageSocialInfo(tab.id);
+    const filename = buildFilename(tab, socialInfo, 'webm');
+    const streamId = await getStreamId(tab.id);
+
+    await ensureOffscreenDocument();
+
+    const result = await chrome.runtime.sendMessage({
+      target: 'offscreen',
+      action: 'startRecording',
+      streamId,
+      filename,
+    });
+
+    if (result?.error) throw new Error(result.error);
+
+    recording = { active: true, filename };
+    sendResponse({ filename });
+  } catch (err) {
+    sendResponse({ error: err.message });
+  }
+}
+
+async function handleStopRecording(sendResponse) {
+  if (!recording.active) {
+    sendResponse({ error: 'Not recording' });
+    return;
+  }
+  try {
+    const result = await chrome.runtime.sendMessage({
+      target: 'offscreen',
+      action: 'stopRecording',
+    });
+
+    recording = { active: false, filename: null };
+
+    try { await chrome.offscreen.closeDocument(); } catch { /* already closed */ }
+
+    sendResponse(result);
+  } catch (err) {
+    sendResponse({ error: err.message });
+  }
+}
