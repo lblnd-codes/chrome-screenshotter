@@ -62,16 +62,21 @@ function extractPageInfo() {
         }
       }
 
-      // Strategy 3: parse translateX of the carousel <ul>/<div> to infer position
+      // Strategy 3: translateX via computed style (catches CSS class transitions,
+      // not just inline style). getComputedStyle returns matrix(1,0,0,1,tx,ty).
       if (slide === null) {
         for (const el of document.querySelectorAll('div[role="dialog"] ul, article ul, div[role="dialog"] > div > div, article > div > div')) {
           const items = [...el.querySelectorAll(':scope > li, :scope > div')].filter(c => c.offsetWidth > 50);
           if (items.length < 2) continue;
-          const tm = (el.style.transform || '').match(/translateX\((-?[\d.]+)px\)/);
-          if (!tm) continue;
-          const slideWidth = el.offsetWidth || items[0].offsetWidth;
+          const raw = window.getComputedStyle(el).transform;
+          if (!raw || raw === 'none') continue;
+          // matrix(a,b,c,d,tx,ty) or translateX(Npx)
+          const tx = raw.match(/matrix\([^,]+,[^,]+,[^,]+,[^,]+,\s*(-?[\d.]+)/) ||
+                     raw.match(/translateX\((-?[\d.]+)px\)/);
+          if (!tx) continue;
+          const slideWidth = el.parentElement ? el.parentElement.offsetWidth : el.offsetWidth;
           if (!slideWidth) continue;
-          const idx = Math.round(Math.abs(parseFloat(tm[1])) / slideWidth);
+          const idx = Math.round(Math.abs(parseFloat(tx[1])) / slideWidth);
           if (idx >= 0 && idx < items.length) { slide = idx + 1; break; }
         }
       }
@@ -89,14 +94,15 @@ function extractPageInfo() {
         }
       }
 
-      // Strategy 5: which <li>/<div> child is centered in the carousel viewport
-      // Works regardless of scroll/transform implementation
+      // Strategy 5: which <li> is centered in its clipping parent's viewport.
+      // The ul is translated so its own bbox is shifted — use parentElement for center.
       if (slide === null) {
         for (const el of document.querySelectorAll('div[role="dialog"] ul, article ul')) {
           const items = [...el.querySelectorAll(':scope > li')];
           if (items.length < 2) continue;
-          const containerRect = el.getBoundingClientRect();
-          const centerX = containerRect.left + containerRect.width / 2;
+          const clip = el.parentElement || el;
+          const clipRect = clip.getBoundingClientRect();
+          const centerX = clipRect.left + clipRect.width / 2;
           for (let i = 0; i < items.length; i++) {
             const r = items[i].getBoundingClientRect();
             if (r.left <= centerX && r.right > centerX) { slide = i + 1; break; }
@@ -105,11 +111,14 @@ function extractPageInfo() {
         }
       }
 
-      // Strategy 6: aria-hidden on list items — visible item is not aria-hidden
+      // Strategy 6: aria-hidden on list items.
+      // Guard: only use if at least one item is explicitly aria-hidden="true",
+      // otherwise findIndex always returns 0 (slide 1) as a false positive.
       if (slide === null) {
         for (const ul of document.querySelectorAll('div[role="dialog"] ul, article ul')) {
           const items = [...ul.querySelectorAll(':scope > li')];
           if (items.length < 2) continue;
+          if (!items.some(li => li.getAttribute('aria-hidden') === 'true')) continue;
           const idx = items.findIndex(li => li.getAttribute('aria-hidden') !== 'true');
           if (idx >= 0) { slide = idx + 1; break; }
         }
