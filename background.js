@@ -39,33 +39,111 @@ function extractPageInfo() {
 
       // Detect carousel and current slide number
       let slide = null;
-      const _dbg = [];
 
       // Strategy 0: img_index in URL (direct post view only)
       const imgIndex = new URL(window.location.href).searchParams.get('img_index');
-      if (imgIndex) { slide = parseInt(imgIndex); _dbg.push('s0:HIT img_index=' + slide); }
+      if (imgIndex) slide = parseInt(imgIndex);
 
-      // Debug: inspect UL structure to understand how Instagram positions slides
+      // Strategy 1: walk up from the UL to find the ancestor scroll container.
+      // Instagram scrolls a wrapper div to advance slides (not the UL itself).
+      // e.g. ancestor.offsetWidth=256, scrollWidth=3840, scrollLeft=256 → slide 2.
+      // The scroll container has scrollWidth that is a whole-number multiple of offsetWidth.
+      if (slide === null) {
+        outer: for (const ul of document.querySelectorAll('div[role="dialog"] ul, article ul')) {
+          const items = [...ul.querySelectorAll(':scope > li')];
+          if (items.length < 2) continue;
+          let node = ul.parentElement;
+          while (node && node.tagName !== 'BODY') {
+            const ow = node.offsetWidth;
+            const sw = node.scrollWidth;
+            if (ow > 50 && sw >= ow * 2 && sw % ow < 2) {
+              slide = Math.round(node.scrollLeft / ow) + 1;
+              break outer;
+            }
+            node = node.parentElement;
+          }
+        }
+      }
+
+      // Strategy 2: individual li transforms — the current slide has translateX≈0,
+      // combined with the ancestor scroll position for the absolute index.
       if (slide === null) {
         for (const ul of document.querySelectorAll('div[role="dialog"] ul, article ul')) {
           const items = [...ul.querySelectorAll(':scope > li')];
           if (items.length < 2) continue;
-          const p = ul.parentElement;
-          const p2 = p && p.parentElement;
-          _dbg.push('UL: ow=' + ul.offsetWidth + ' sw=' + ul.scrollWidth + ' sl=' + ul.scrollLeft);
-          _dbg.push('UL transform=' + window.getComputedStyle(ul).transform);
-          if (p) _dbg.push('P: ow=' + p.offsetWidth + ' sw=' + p.scrollWidth + ' sl=' + p.scrollLeft + ' tx=' + window.getComputedStyle(p).transform);
-          if (p2) _dbg.push('P2: ow=' + p2.offsetWidth + ' sw=' + p2.scrollWidth + ' sl=' + p2.scrollLeft + ' tx=' + window.getComputedStyle(p2).transform);
+          const slideWidth = items.find(li => li.offsetWidth > 50)?.offsetWidth;
+          if (!slideWidth) continue;
+          // Find the li whose translateX is closest to 0 (the visible one)
+          let minTx = Infinity, minIdx = -1;
           items.forEach((li, i) => {
-            const s = window.getComputedStyle(li);
-            const r = li.getBoundingClientRect();
-            _dbg.push('li[' + i + ']: offsetLeft=' + li.offsetLeft + ' ow=' + li.offsetWidth + ' tx=' + s.transform + ' left=' + s.left + ' rect.left=' + Math.round(r.left));
+            const m = window.getComputedStyle(li).transform.match(/matrix\([^,]+,[^,]+,[^,]+,[^,]+,\s*(-?[\d.]+)/);
+            if (!m) return;
+            const tx = Math.abs(parseFloat(m[1]));
+            if (tx < minTx) { minTx = tx; minIdx = i; }
           });
+          if (minIdx < 0 || minTx > slideWidth * 0.5) continue;
+          // Use ancestor scroll for absolute position if available, else use li index
+          let node = ul.parentElement;
+          while (node && node.tagName !== 'BODY') {
+            const ow = node.offsetWidth;
+            const sw = node.scrollWidth;
+            if (ow > 50 && sw >= ow * 2 && sw % ow < 2) {
+              slide = Math.round(node.scrollLeft / ow) + 1;
+              break;
+            }
+            node = node.parentElement;
+          }
+          if (slide === null) slide = minIdx + 1;
+          break;
         }
       }
 
-      _dbg.push('FINAL slide=' + slide);
-      console.log('[ScreenshotExt]\n' + _dbg.join('\n'));
+      // Strategy 3: bounding rect — which li is centered in its clipping parent
+      if (slide === null) {
+        for (const ul of document.querySelectorAll('div[role="dialog"] ul, article ul')) {
+          const items = [...ul.querySelectorAll(':scope > li')];
+          if (items.length < 2) continue;
+          const clip = ul.parentElement || ul;
+          const clipRect = clip.getBoundingClientRect();
+          const centerX = clipRect.left + clipRect.width / 2;
+          for (let i = 0; i < items.length; i++) {
+            const r = items[i].getBoundingClientRect();
+            if (r.left <= centerX && r.right > centerX) { slide = i + 1; break; }
+          }
+          if (slide !== null) break;
+        }
+      }
+
+      // Strategy 4: aria-label "X of Y" — visible elements only
+      if (slide === null) {
+        for (const el of document.querySelectorAll('[aria-label*=" of "]')) {
+          const r = el.getBoundingClientRect();
+          if (r.width === 0 || r.right < 0 || r.left > window.innerWidth) continue;
+          const am = el.getAttribute('aria-label').match(/(\d+)\s+of\s+\d+/i);
+          if (am) { slide = parseInt(am[1]); break; }
+        }
+      }
+
+      // Strategy 5: ARIA tablist dot indicators
+      if (slide === null) {
+        const tablist = document.querySelector('[role="tablist"]');
+        if (tablist) {
+          const tabs = [...tablist.querySelectorAll('[role="tab"]')];
+          const idx = tabs.findIndex(t => t.getAttribute('aria-selected') === 'true');
+          if (idx >= 0) slide = idx + 1;
+        }
+      }
+
+      // Strategy 6: aria-hidden (guarded — only when at least one li is explicitly hidden)
+      if (slide === null) {
+        for (const ul of document.querySelectorAll('div[role="dialog"] ul, article ul')) {
+          const items = [...ul.querySelectorAll(':scope > li')];
+          if (items.length < 2) continue;
+          if (!items.some(li => li.getAttribute('aria-hidden') === 'true')) continue;
+          const idx = items.findIndex(li => li.getAttribute('aria-hidden') !== 'true');
+          if (idx >= 0) { slide = idx + 1; break; }
+        }
+      }
 
       return { username, postId: sanitize(m[1]), slide };
     }
