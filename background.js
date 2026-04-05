@@ -44,38 +44,26 @@ function extractPageInfo() {
       const imgIndex = new URL(window.location.href).searchParams.get('img_index');
       if (imgIndex) slide = parseInt(imgIndex);
 
-      // Strategy 1: dual-transform approach.
-      // Instagram applies two transforms to each li:
-      //   - CSS class: individual `translate` property that offsets to the visual origin
-      //   - Inline style: `transform: translateX(Xpx)` encoding absolute position
-      // getComputedStyle().transform resolves both together → current slide has tx ≈ 0.
-      // Reading inline style.transform on that same li gives the absolute position,
-      // where X / slideWidth = 0-based slide index.
+      // Strategy 1: clip-offset approach.
+      // Instagram renders a virtual window of ~5 slides, each with an absolute
+      // translateX encoding its position in carousel scroll space. The UL itself
+      // has no transform — it's positioned so its left edge is off-screen to the
+      // left. The actual clip container (first overflow-x: hidden/auto ancestor)
+      // stays fixed. Current slide = (clipLeft - ulLeft) / slideWidth, rounded.
       if (slide === null) {
         for (const ul of document.querySelectorAll('div[role="dialog"] ul, article ul')) {
-          const items = [...ul.querySelectorAll(':scope > li')];
+          const items = [...ul.querySelectorAll(':scope > li')].filter(li => li.offsetWidth > 50);
           if (items.length < 2) continue;
-          const slideWidth = items.find(li => li.offsetWidth > 50)?.offsetWidth;
-          if (!slideWidth) continue;
-
-          function parseTx(transformStr) {
-            if (!transformStr || transformStr === 'none') return 0;
-            const m = transformStr.match(/matrix\([^,]+,[^,]+,[^,]+,[^,]+,\s*(-?[\d.]+)/) ||
-                      transformStr.match(/translateX\((-?[\d.]+)px\)/);
-            return m ? parseFloat(m[1]) : 0;
+          const slideWidth = items[0].offsetWidth;
+          const ulLeft = ul.getBoundingClientRect().left;
+          let clip = ul.parentElement;
+          while (clip && window.getComputedStyle(clip).overflowX === 'visible') {
+            clip = clip.parentElement;
           }
-
-          // Find the li whose COMPUTED translateX is closest to 0
-          let bestLi = null, bestTx = Infinity;
-          for (const li of items) {
-            const tx = Math.abs(parseTx(window.getComputedStyle(li).transform));
-            if (tx < bestTx) { bestTx = tx; bestLi = li; }
-          }
-          if (!bestLi || bestTx > slideWidth * 0.5) continue;
-
-          // Read its inline style for the absolute carousel position
-          const inlineTx = parseTx(bestLi.style.transform);
-          slide = Math.max(1, Math.round(inlineTx / slideWidth) + 1);
+          if (!clip) continue;
+          const scrollOffset = clip.getBoundingClientRect().left - ulLeft;
+          if (scrollOffset < 0) continue;
+          slide = Math.round(scrollOffset / slideWidth) + 1;
           break;
         }
       }
