@@ -39,45 +39,46 @@ function extractPageInfo() {
 
       // Detect carousel and current slide number
       let slide = null;
+      const _dbg = [];
 
       // Strategy 0: Instagram sets ?img_index=N in the URL for direct post views
       const imgIndex = new URL(window.location.href).searchParams.get('img_index');
-      if (imgIndex) slide = parseInt(imgIndex);
+      if (imgIndex) { slide = parseInt(imgIndex); _dbg.push('s0:img_index=' + slide); }
 
-      // Strategy 1: translateX via computed style — run early before ARIA strategies
-      // because ARIA attrs (e.g. aria-label "1 of N") may be stale/first-in-DOM
-      // and report slide 1 even when the user has navigated away.
+      // Strategy 1: translateX via computed style
       if (slide === null) {
         for (const el of document.querySelectorAll('div[role="dialog"] ul, article ul, div[role="dialog"] > div > div, article > div > div')) {
           const items = [...el.querySelectorAll(':scope > li, :scope > div')].filter(c => c.offsetWidth > 50);
           if (items.length < 2) continue;
           const raw = window.getComputedStyle(el).transform;
+          _dbg.push('s1:el=' + el.tagName + ' items=' + items.length + ' transform=' + raw);
           if (!raw || raw === 'none') continue;
           const tx = raw.match(/matrix\([^,]+,[^,]+,[^,]+,[^,]+,\s*(-?[\d.]+)/) ||
                      raw.match(/translateX\((-?[\d.]+)px\)/);
           if (!tx) continue;
           const slideWidth = el.parentElement ? el.parentElement.offsetWidth : el.offsetWidth;
+          _dbg.push('s1:tx=' + tx[1] + ' slideWidth=' + slideWidth);
           if (!slideWidth) continue;
           const idx = Math.round(Math.abs(parseFloat(tx[1])) / slideWidth);
-          if (idx >= 0 && idx < items.length) { slide = idx + 1; break; }
+          if (idx >= 0 && idx < items.length) { slide = idx + 1; _dbg.push('s1:HIT slide=' + slide); break; }
         }
       }
 
-      // Strategy 2: scrollLeft on the carousel container
+      // Strategy 2: scrollLeft
       if (slide === null) {
         for (const el of document.querySelectorAll('div[role="dialog"] ul, article ul, div[role="dialog"] > div > div, article > div > div')) {
           const items = [...el.querySelectorAll(':scope > li, :scope > div')].filter(c => c.offsetWidth > 50);
           if (items.length < 2) continue;
+          _dbg.push('s2:el=' + el.tagName + ' scrollLeft=' + el.scrollLeft + ' scrollWidth=' + el.scrollWidth + ' offsetWidth=' + el.offsetWidth);
           if (el.scrollLeft === 0 && el.scrollWidth <= el.offsetWidth) continue;
           const slideWidth = items[0].offsetWidth;
           if (!slideWidth) continue;
           const idx = Math.round(el.scrollLeft / slideWidth);
-          if (idx >= 0 && idx < items.length) { slide = idx + 1; break; }
+          if (idx >= 0 && idx < items.length) { slide = idx + 1; _dbg.push('s2:HIT slide=' + slide); break; }
         }
       }
 
-      // Strategy 3: which <li> is centered in its clipping parent's viewport.
-      // Use parentElement rect (not the ul's own, which is translated off-center).
+      // Strategy 3: bounding rect center
       if (slide === null) {
         for (const el of document.querySelectorAll('div[role="dialog"] ul, article ul')) {
           const items = [...el.querySelectorAll(':scope > li')];
@@ -85,46 +86,54 @@ function extractPageInfo() {
           const clip = el.parentElement || el;
           const clipRect = clip.getBoundingClientRect();
           const centerX = clipRect.left + clipRect.width / 2;
+          _dbg.push('s3:ul items=' + items.length + ' clipRect=[' + Math.round(clipRect.left) + ',' + Math.round(clipRect.right) + '] centerX=' + Math.round(centerX));
+          items.forEach((li, i) => {
+            const r = li.getBoundingClientRect();
+            _dbg.push('  li[' + i + '] left=' + Math.round(r.left) + ' right=' + Math.round(r.right));
+          });
           for (let i = 0; i < items.length; i++) {
             const r = items[i].getBoundingClientRect();
-            if (r.left <= centerX && r.right > centerX) { slide = i + 1; break; }
+            if (r.left <= centerX && r.right > centerX) { slide = i + 1; _dbg.push('s3:HIT slide=' + slide); break; }
           }
           if (slide !== null) break;
         }
       }
 
-      // Strategy 4: aria-label "X of Y" — only on VISIBLE elements.
-      // querySelector returns first in DOM order which is always slide 1's element.
+      // Strategy 4: aria-label "X of Y" — visible elements only
       if (slide === null) {
         for (const el of document.querySelectorAll('[aria-label*=" of "]')) {
           const r = el.getBoundingClientRect();
+          _dbg.push('s4:label="' + el.getAttribute('aria-label') + '" rect=[' + Math.round(r.left) + ',' + Math.round(r.right) + ']');
           if (r.width === 0 || r.right < 0 || r.left > window.innerWidth) continue;
           const am = el.getAttribute('aria-label').match(/(\d+)\s+of\s+\d+/i);
-          if (am) { slide = parseInt(am[1]); break; }
+          if (am) { slide = parseInt(am[1]); _dbg.push('s4:HIT slide=' + slide); break; }
         }
       }
 
-      // Strategy 5: ARIA tablist dot indicators
+      // Strategy 5: ARIA tablist
       if (slide === null) {
         const tablist = document.querySelector('[role="tablist"]');
         if (tablist) {
           const tabs = [...tablist.querySelectorAll('[role="tab"]')];
           const idx = tabs.findIndex(t => t.getAttribute('aria-selected') === 'true');
-          if (idx >= 0) slide = idx + 1;
+          _dbg.push('s5:tablist tabs=' + tabs.length + ' selectedIdx=' + idx);
+          if (idx >= 0) { slide = idx + 1; _dbg.push('s5:HIT slide=' + slide); }
         }
       }
 
-      // Strategy 6: aria-hidden on list items.
-      // Guard: only use if at least one item is explicitly aria-hidden="true".
+      // Strategy 6: aria-hidden (guarded)
       if (slide === null) {
         for (const ul of document.querySelectorAll('div[role="dialog"] ul, article ul')) {
           const items = [...ul.querySelectorAll(':scope > li')];
           if (items.length < 2) continue;
           if (!items.some(li => li.getAttribute('aria-hidden') === 'true')) continue;
           const idx = items.findIndex(li => li.getAttribute('aria-hidden') !== 'true');
-          if (idx >= 0) { slide = idx + 1; break; }
+          if (idx >= 0) { slide = idx + 1; _dbg.push('s6:HIT slide=' + slide); break; }
         }
       }
+
+      _dbg.push('FINAL slide=' + slide);
+      console.log('[ScreenshotExt]', _dbg.join('\n'));
 
       return { username, postId: sanitize(m[1]), slide };
     }
