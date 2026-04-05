@@ -44,6 +44,30 @@ function extractPageInfo() {
       const imgIndex = new URL(window.location.href).searchParams.get('img_index');
       if (imgIndex) slide = parseInt(imgIndex);
 
+      // DEBUG: dump li attributes + all aria-labels with numbers in dialog
+      if (slide === null) {
+        const _d = [];
+        for (const ul of document.querySelectorAll('div[role="dialog"] ul, article ul')) {
+          const items = [...ul.querySelectorAll(':scope > li')];
+          if (items.length < 2) continue;
+          items.forEach((li, i) => {
+            const attrs = [...li.attributes].map(a => a.name + '="' + a.value + '"').join(' ');
+            _d.push('li[' + i + ']: ' + (attrs || '(none)'));
+          });
+        }
+        for (const el of document.querySelectorAll('div[role="dialog"] [aria-label], article [aria-label]')) {
+          const v = el.getAttribute('aria-label');
+          if (/\d/.test(v)) _d.push('aria-label: "' + v + '" <' + el.tagName + '>');
+        }
+        for (const el of document.querySelectorAll('div[role="dialog"] [aria-posinset], article [aria-posinset]')) {
+          _d.push('aria-posinset=' + el.getAttribute('aria-posinset') + ' setsize=' + el.getAttribute('aria-setsize') + ' <' + el.tagName + '>');
+        }
+        for (const el of document.querySelectorAll('div[role="dialog"] [aria-current], article [aria-current]')) {
+          _d.push('aria-current="' + el.getAttribute('aria-current') + '" label="' + el.getAttribute('aria-label') + '" <' + el.tagName + '>');
+        }
+        console.log('[ScreenshotExt]\n' + _d.join('\n'));
+      }
+
       // Strategy 1: walk up from the UL to find the ancestor scroll container.
       // Instagram scrolls a wrapper div to advance slides (not the UL itself).
       // e.g. ancestor.offsetWidth=256, scrollWidth=3840, scrollLeft=256 → slide 2.
