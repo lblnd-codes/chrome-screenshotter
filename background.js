@@ -28,9 +28,21 @@ function extractPageInfo() {
         const hrefMatch = profileLink.getAttribute('href').match(/^\/([^/?]+)/);
         if (hrefMatch) username = sanitize(hrefMatch[1]) || 'unknown';
       }
+      // Fallback: scan all links for the Instagram username pattern (/word/ or /word_.)
+      if (username === 'unknown') {
+        const reserved = new Set(['explore','reels','direct','accounts','p','reel','stories','tv','ar','about','legal','privacy','help','press','api','blog','jobs','branded','hashtag']);
+        for (const a of document.querySelectorAll('a[href^="/"]')) {
+          const um = a.getAttribute('href').match(/^\/([a-zA-Z0-9._]{2,30})\/?$/);
+          if (um && !reserved.has(um[1])) { username = sanitize(um[1]); break; }
+        }
+      }
 
       // Detect carousel and current slide number
       let slide = null;
+
+      // Strategy 0 (most reliable): Instagram sets ?img_index=N in the URL when navigating slides
+      const imgIndex = new URL(window.location.href).searchParams.get('img_index');
+      if (imgIndex) slide = parseInt(imgIndex);
 
       // Strategy 1: aria-label containing "X of Y" (e.g. "Photo 2 of 5")
       const ariaEl = document.querySelector('[aria-label*=" of "]');
