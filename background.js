@@ -44,80 +44,38 @@ function extractPageInfo() {
       const imgIndex = new URL(window.location.href).searchParams.get('img_index');
       if (imgIndex) slide = parseInt(imgIndex);
 
-      // DEBUG: dump li attributes + all aria-labels with numbers in dialog
-      if (slide === null) {
-        const _d = [];
-        for (const ul of document.querySelectorAll('div[role="dialog"] ul, article ul')) {
-          const items = [...ul.querySelectorAll(':scope > li')];
-          if (items.length < 2) continue;
-          items.forEach((li, i) => {
-            const attrs = [...li.attributes].map(a => a.name + '="' + a.value + '"').join(' ');
-            _d.push('li[' + i + ']: ' + (attrs || '(none)'));
-          });
-        }
-        for (const el of document.querySelectorAll('div[role="dialog"] [aria-label], article [aria-label]')) {
-          const v = el.getAttribute('aria-label');
-          if (/\d/.test(v)) _d.push('aria-label: "' + v + '" <' + el.tagName + '>');
-        }
-        for (const el of document.querySelectorAll('div[role="dialog"] [aria-posinset], article [aria-posinset]')) {
-          _d.push('aria-posinset=' + el.getAttribute('aria-posinset') + ' setsize=' + el.getAttribute('aria-setsize') + ' <' + el.tagName + '>');
-        }
-        for (const el of document.querySelectorAll('div[role="dialog"] [aria-current], article [aria-current]')) {
-          _d.push('aria-current="' + el.getAttribute('aria-current') + '" label="' + el.getAttribute('aria-label') + '" <' + el.tagName + '>');
-        }
-        console.log('[ScreenshotExt]\n' + _d.join('\n'));
-      }
-
-      // Strategy 1: walk up from the UL to find the ancestor scroll container.
-      // Instagram scrolls a wrapper div to advance slides (not the UL itself).
-      // e.g. ancestor.offsetWidth=256, scrollWidth=3840, scrollLeft=256 → slide 2.
-      // The scroll container has scrollWidth that is a whole-number multiple of offsetWidth.
-      if (slide === null) {
-        outer: for (const ul of document.querySelectorAll('div[role="dialog"] ul, article ul')) {
-          const items = [...ul.querySelectorAll(':scope > li')];
-          if (items.length < 2) continue;
-          let node = ul.parentElement;
-          while (node && node.tagName !== 'BODY') {
-            const ow = node.offsetWidth;
-            const sw = node.scrollWidth;
-            if (ow > 50 && sw >= ow * 2 && sw % ow < 2) {
-              slide = Math.round(node.scrollLeft / ow) + 1;
-              break outer;
-            }
-            node = node.parentElement;
-          }
-        }
-      }
-
-      // Strategy 2: individual li transforms — the current slide has translateX≈0,
-      // combined with the ancestor scroll position for the absolute index.
+      // Strategy 1: dual-transform approach.
+      // Instagram applies two transforms to each li:
+      //   - CSS class: individual `translate` property that offsets to the visual origin
+      //   - Inline style: `transform: translateX(Xpx)` encoding absolute position
+      // getComputedStyle().transform resolves both together → current slide has tx ≈ 0.
+      // Reading inline style.transform on that same li gives the absolute position,
+      // where X / slideWidth = 0-based slide index.
       if (slide === null) {
         for (const ul of document.querySelectorAll('div[role="dialog"] ul, article ul')) {
           const items = [...ul.querySelectorAll(':scope > li')];
           if (items.length < 2) continue;
           const slideWidth = items.find(li => li.offsetWidth > 50)?.offsetWidth;
           if (!slideWidth) continue;
-          // Find the li whose translateX is closest to 0 (the visible one)
-          let minTx = Infinity, minIdx = -1;
-          items.forEach((li, i) => {
-            const m = window.getComputedStyle(li).transform.match(/matrix\([^,]+,[^,]+,[^,]+,[^,]+,\s*(-?[\d.]+)/);
-            if (!m) return;
-            const tx = Math.abs(parseFloat(m[1]));
-            if (tx < minTx) { minTx = tx; minIdx = i; }
-          });
-          if (minIdx < 0 || minTx > slideWidth * 0.5) continue;
-          // Use ancestor scroll for absolute position if available, else use li index
-          let node = ul.parentElement;
-          while (node && node.tagName !== 'BODY') {
-            const ow = node.offsetWidth;
-            const sw = node.scrollWidth;
-            if (ow > 50 && sw >= ow * 2 && sw % ow < 2) {
-              slide = Math.round(node.scrollLeft / ow) + 1;
-              break;
-            }
-            node = node.parentElement;
+
+          function parseTx(transformStr) {
+            if (!transformStr || transformStr === 'none') return 0;
+            const m = transformStr.match(/matrix\([^,]+,[^,]+,[^,]+,[^,]+,\s*(-?[\d.]+)/) ||
+                      transformStr.match(/translateX\((-?[\d.]+)px\)/);
+            return m ? parseFloat(m[1]) : 0;
           }
-          if (slide === null) slide = minIdx + 1;
+
+          // Find the li whose COMPUTED translateX is closest to 0
+          let bestLi = null, bestTx = Infinity;
+          for (const li of items) {
+            const tx = Math.abs(parseTx(window.getComputedStyle(li).transform));
+            if (tx < bestTx) { bestTx = tx; bestLi = li; }
+          }
+          if (!bestLi || bestTx > slideWidth * 0.5) continue;
+
+          // Read its inline style for the absolute carousel position
+          const inlineTx = parseTx(bestLi.style.transform);
+          slide = Math.max(1, Math.round(inlineTx / slideWidth) + 1);
           break;
         }
       }
