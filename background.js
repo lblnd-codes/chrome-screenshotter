@@ -40,37 +40,19 @@ function extractPageInfo() {
       // Detect carousel and current slide number
       let slide = null;
 
-      // Strategy 0 (most reliable): Instagram sets ?img_index=N in the URL when navigating slides
+      // Strategy 0: Instagram sets ?img_index=N in the URL for direct post views
       const imgIndex = new URL(window.location.href).searchParams.get('img_index');
       if (imgIndex) slide = parseInt(imgIndex);
 
-      // Strategy 1: aria-label containing "X of Y" (e.g. "Photo 2 of 5")
-      const ariaEl = document.querySelector('[aria-label*=" of "]');
-      if (ariaEl) {
-        const am = ariaEl.getAttribute('aria-label').match(/(\d+)\s+of\s+\d+/i);
-        if (am) slide = parseInt(am[1]);
-      }
-
-      // Strategy 2: ARIA tab pattern used for dot indicators
-      // e.g. <div role="tablist"><button role="tab" aria-selected="true">
-      if (slide === null) {
-        const tablist = document.querySelector('[role="tablist"]');
-        if (tablist) {
-          const tabs = [...tablist.querySelectorAll('[role="tab"]')];
-          const idx = tabs.findIndex(t => t.getAttribute('aria-selected') === 'true');
-          if (idx >= 0) slide = idx + 1;
-        }
-      }
-
-      // Strategy 3: translateX via computed style (catches CSS class transitions,
-      // not just inline style). getComputedStyle returns matrix(1,0,0,1,tx,ty).
+      // Strategy 1: translateX via computed style — run early before ARIA strategies
+      // because ARIA attrs (e.g. aria-label "1 of N") may be stale/first-in-DOM
+      // and report slide 1 even when the user has navigated away.
       if (slide === null) {
         for (const el of document.querySelectorAll('div[role="dialog"] ul, article ul, div[role="dialog"] > div > div, article > div > div')) {
           const items = [...el.querySelectorAll(':scope > li, :scope > div')].filter(c => c.offsetWidth > 50);
           if (items.length < 2) continue;
           const raw = window.getComputedStyle(el).transform;
           if (!raw || raw === 'none') continue;
-          // matrix(a,b,c,d,tx,ty) or translateX(Npx)
           const tx = raw.match(/matrix\([^,]+,[^,]+,[^,]+,[^,]+,\s*(-?[\d.]+)/) ||
                      raw.match(/translateX\((-?[\d.]+)px\)/);
           if (!tx) continue;
@@ -81,7 +63,7 @@ function extractPageInfo() {
         }
       }
 
-      // Strategy 4: scrollLeft on the carousel container
+      // Strategy 2: scrollLeft on the carousel container
       if (slide === null) {
         for (const el of document.querySelectorAll('div[role="dialog"] ul, article ul, div[role="dialog"] > div > div, article > div > div')) {
           const items = [...el.querySelectorAll(':scope > li, :scope > div')].filter(c => c.offsetWidth > 50);
@@ -94,8 +76,8 @@ function extractPageInfo() {
         }
       }
 
-      // Strategy 5: which <li> is centered in its clipping parent's viewport.
-      // The ul is translated so its own bbox is shifted — use parentElement for center.
+      // Strategy 3: which <li> is centered in its clipping parent's viewport.
+      // Use parentElement rect (not the ul's own, which is translated off-center).
       if (slide === null) {
         for (const el of document.querySelectorAll('div[role="dialog"] ul, article ul')) {
           const items = [...el.querySelectorAll(':scope > li')];
@@ -111,9 +93,29 @@ function extractPageInfo() {
         }
       }
 
+      // Strategy 4: aria-label "X of Y" — only on VISIBLE elements.
+      // querySelector returns first in DOM order which is always slide 1's element.
+      if (slide === null) {
+        for (const el of document.querySelectorAll('[aria-label*=" of "]')) {
+          const r = el.getBoundingClientRect();
+          if (r.width === 0 || r.right < 0 || r.left > window.innerWidth) continue;
+          const am = el.getAttribute('aria-label').match(/(\d+)\s+of\s+\d+/i);
+          if (am) { slide = parseInt(am[1]); break; }
+        }
+      }
+
+      // Strategy 5: ARIA tablist dot indicators
+      if (slide === null) {
+        const tablist = document.querySelector('[role="tablist"]');
+        if (tablist) {
+          const tabs = [...tablist.querySelectorAll('[role="tab"]')];
+          const idx = tabs.findIndex(t => t.getAttribute('aria-selected') === 'true');
+          if (idx >= 0) slide = idx + 1;
+        }
+      }
+
       // Strategy 6: aria-hidden on list items.
-      // Guard: only use if at least one item is explicitly aria-hidden="true",
-      // otherwise findIndex always returns 0 (slide 1) as a false positive.
+      // Guard: only use if at least one item is explicitly aria-hidden="true".
       if (slide === null) {
         for (const ul of document.querySelectorAll('div[role="dialog"] ul, article ul')) {
           const items = [...ul.querySelectorAll(':scope > li')];
